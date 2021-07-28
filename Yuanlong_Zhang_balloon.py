@@ -69,6 +69,7 @@ Problems unsloved:
 1.Why in INI file capitalized letter in variables name will convert to small case when accessing it
     -guess: somthing happened during converting INI file into local dict, function called configparser.item()
 2.how to meet both single shoot(one tap) & continous shoot(hold) requirement without adding extra function keys
+    -current attempt: enable key_repeat, but this does not allow auto shooting while change direction
 3.Better way to load img & music without call all each item
     -guess: spritesheet for img, ? for music
 4.how to dynamic render text using relative distance.
@@ -148,6 +149,7 @@ class Ballon(pygame.sprite.Sprite):
         self.destory = True
         self.image = game.img_explosion
         #add sound effect
+        pygame.mixer.Sound.play(game.sound_hit)
 
 
 
@@ -163,6 +165,8 @@ class Cannon(pygame.sprite.Sprite):
         #Cannon spawn at right bottom corner of the screen
         self.half_edge = self.rect.width/2
         self.rect.center = (game.width-self.half_edge, game.hight-self.half_edge)
+        #tag for auto fire function
+        self.auto_fire = False
 
     def update(self, game):
         keys = pygame.key.get_pressed()
@@ -172,6 +176,18 @@ class Cannon(pygame.sprite.Sprite):
             self.rect.centery -= move_distance
         if keys[pygame.K_DOWN] and self.rect.centery < int(game.config['APP']['window_hight'])-self.half_edge:
             self.rect.centery += move_distance
+        #check for auto fire
+        if self.auto_fire:
+            self.fire(game)
+    
+    #Not used, currently use key_repeat as alternative
+    def auto_fire(self, multishoot=False):
+        self.auto_fire = multishoot
+
+    def fire(self, game):
+        Bullet(game)
+
+
         
 
         
@@ -185,6 +201,7 @@ class Bullet(pygame.sprite.Sprite):
         self.image = game.img_bullet
         self.rect = self.image.get_rect()
         #Bullet fire from Cannon
+        pygame.mixer.Sound.play(game.sound_fire)
         self.rect.center = game.player.rect.center
 
 
@@ -204,20 +221,21 @@ class Game:
     def __init__(self, configeration):
         #load game configerations
         self.loadData(configeration)
-
         #setting up game window
         pygame.init()       #for the game window
-        pygame.mixer.init() #for loading & playing sounds
         self.width = int(self.config['APP']['window_width'])
         self.hight = int(self.config['APP']['window_hight'])
         self.screen = pygame.display.set_mode((self.width, self.hight))
         #load image
         self.loadImage()
+        #some game attributes
         pygame.display.set_caption(self.config['APP']['title'])
         pygame.display.set_icon(self.img_bullet)
         self.clock = pygame.time.Clock()
         self.running = True
-        self.font_name = pygame.font.match_font(self.config['APP']['font'])
+        #load sound effects
+        self.loadSound()
+       
 
         
 
@@ -236,6 +254,8 @@ class Game:
         self.img_bullet = pygame.image.load(self.config['SPRITE']['bullet']).convert_alpha()
         self.img_explosion = pygame.image.load(self.config['SPRITE']['fire_explosion']).convert_alpha()
         self.img_background = pygame.image.load(self.config['SPRITE']['background']).convert_alpha()
+        self.img_op = pygame.image.load(self.config['SPRITE']['op']).convert_alpha()
+        self.img_ed = pygame.image.load(self.config['SPRITE']['ed']).convert_alpha()
         #resize them 
         self.img_ballon = pygame.transform.scale(self.img_ballon
             , (int(self.config['SPRITE']['ballon_size']), int(self.config['SPRITE']['ballon_size'])))
@@ -247,6 +267,19 @@ class Game:
             , (int(self.config['SPRITE']['ballon_size']), int(self.config['SPRITE']['ballon_size'])))
         self.img_background = pygame.transform.scale(self.img_background
             , (self.width, self.hight))
+        self.img_op = pygame.transform.scale(self.img_op
+            , (self.width, self.hight))
+        self.img_ed = pygame.transform.scale(self.img_ed
+            , (self.width, self.hight))
+
+    def loadSound(self):
+        pygame.mixer.init()
+        self.sound_fire = pygame.mixer.Sound(self.config['MUSIC']['fire_sound'])
+        self.sound_hit  = pygame.mixer.Sound(self.config['MUSIC']['hit_target'])
+        #these just file, use mixer.music.load to loop 
+        self.sound_background = self.config['MUSIC']['game_play']
+        self.sound_op = self.config['MUSIC']['op']
+        self.sound_ed = self.config['MUSIC']['ed']
 
     def new(self):
         #reset some game index
@@ -260,15 +293,15 @@ class Game:
         Ballon(self)
         self.bullets = pygame.sprite.Group()
         self.player = Cannon(self)
-        #gameplay_music=pygame.mixer.music.load(config['MUSIC']['game_play'])
-       #gameplay_music.play(loops=-1)
         self.run()
 
     def run(self):
-        #TODO add open section
-        self.playing = True
+        self.start_screen()
+        #for looping background
         self.bg_i = 0
-        while self.playing:
+        pygame.mixer.music.load(self.sound_background)
+        pygame.mixer.music.play(-1)
+        while self.playing and self.running:
             self.clock.tick(int(self.config['APP']['fps']))
             self.events()
             self.update()
@@ -286,27 +319,29 @@ class Game:
             Ballon(self)
             self.mob_spawn_interval -= int(self.config['CONTROL']['ballon_spawn_reduction'])
 
-        #hit ballon?
+        #hit ballon
         for ballon in self.ballons:
-            if pygame.sprite.spritecollide(ballon, self.bullets, True, pygame.sprite.collide_mask):
+            if pygame.sprite.spritecollide(ballon, self.bullets, True, pygame.sprite.collide_mask) and not ballon.destory:
                 self.score += int(self.config['CONTROL']['ballon_score'])
                 ballon.explosion(self)
 
     def events(self):
+        #allowing triger multiple event when holding a key
+        pygame.key.set_repeat(200, 200)
         for event in pygame.event.get():
             #when close window
             if event.type == pygame.QUIT:
                 if self.playing:
                     self.playing = False
                 self.running = False
-            #TODO: press ESC for pause
+            #TODO: press ESC for pause-mute sound button
             #Question 2
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
             #TODO: count for the press time interval, turn on multiple fire
             #alternatively add a weapon switch button
             #press space bar to fire one bullet
-                    Bullet(self)
+                    self.player.fire(self)
 
 
     def draw(self):
@@ -320,7 +355,8 @@ class Game:
         self.bg_i -= 1
         self.all_sprites.draw(self.screen)
         #draw scores
-        font = pygame.font.SysFont(self.font_name, int(self.config['APP']['text_size']))
+        font = pygame.font.SysFont(pygame.font.match_font(self.config['APP']['text_font'])
+            , int(self.config['APP']['text_size']))
         score_text = 'Score: '+ str(self.score)
         missed_text = 'Missed: '+ str(self.missed)
         img_score = font.render(score_text, True, BLUE)
@@ -335,6 +371,35 @@ class Game:
 
 
     #TODO: show start screen
+    def start_screen(self):
+        #load background & music
+        self.screen.fill(BLACK)
+        self.screen.blit(self.img_op, (0,0))
+        pygame.mixer.music.load(self.sound_op)
+        pygame.mixer.music.play(-1)
+        #load font
+        font1 = pygame.font.SysFont(pygame.font.match_font(self.config['APP']['title_font'])
+            , int(self.config['APP']['title_size']))
+        font2 = pygame.font.SysFont(pygame.font.match_font(self.config['APP']['subtitle_font'])
+            , int(self.config['APP']['subtitle_size']))
+        img_title = font1.render('Ballon Shooting!', True, BLACK)
+        img_press_start = font2.render('Press SPACE To Start!', True, BLACK)
+        self.screen.blit(img_title, (self.width/4, self.hight/5*1))
+        self.screen.blit(img_press_start, (self.width/5*1.5, self.hight/5*3))
+        self.playing = False
+        while not self.playing:
+            for event in pygame.event.get():
+                #check input
+                if event.type == pygame.QUIT:
+                    self.running = False
+                    self.playing = True
+                if event.type == pygame.KEYDOWN:
+                    self.playing = True
+                    #TODO: transaction animation
+            pygame.display.update()
+        
+        
+
     #TODO: show pause screen
     #TODO: show end screen
 
@@ -345,5 +410,5 @@ game = Game(configFile)
 while game.running:
     game.new()
 
-#pygame.quit()
+pygame.quit()
 
